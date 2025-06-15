@@ -34,15 +34,15 @@ const SignatureCapture = ({
       canvas.style.height = `${height}px`;
       canvas.getContext('2d')?.scale(ratio, ratio);
       
-      // Initialize SignaturePad
+      // Initialize SignaturePad with optimized parameters for smoothness
       signaturePadRef.current = new SignaturePad(canvas, {
         backgroundColor: 'rgb(255, 255, 255)',
         penColor,
-        minWidth: 1,
-        maxWidth: 3,
-        throttle: 0,
-        minDistance: 2,
-        velocityFilterWeight: 0.7
+        minWidth: 0.5,  // Thinner minimum width for more detail
+        maxWidth: 2.5,  // Thicker maximum width for pressure sensitivity
+        throttle: 16,   // 60fps for smooth animation
+        minDistance: 1, // More points for smoother curves
+        velocityFilterWeight: 0.7, // Balance between speed and smoothness
       });
 
       // Add event listeners for isEmpty state
@@ -84,7 +84,7 @@ const SignatureCapture = ({
               x: point.x,
               y: point.y,
               timestamp: point.time,
-              pressure: point.pressure || 0.5 // Use actual pressure or default to 0.5
+              pressure: point.pressure || 0.5
             });
           });
         });

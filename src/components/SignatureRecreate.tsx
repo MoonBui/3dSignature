@@ -97,23 +97,32 @@ const SignatureRecreate = ({
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
 
-      // Draw signature
+      // Draw signature using quadratic Bézier curves
       ctx.beginPath();
-      let isFirstPoint = true;
       
-      for (const point of currentPoints) {
-        if (!point || typeof point.x !== 'number' || typeof point.y !== 'number') continue;
+      for (let i = 0; i < currentPoints.length - 1; i++) {
+        const current = currentPoints[i];
+        const next = currentPoints[i + 1];
+        
+        if (!current || !next || 
+            typeof current.x !== 'number' || typeof current.y !== 'number' ||
+            typeof next.x !== 'number' || typeof next.y !== 'number') continue;
+
+        // Calculate control point for the quadratic curve
+        const midX = (current.x + next.x) / 2;
+        const midY = (current.y + next.y) / 2;
         
         // Adjust line width based on pressure
-        const lineWidth = baseLineWidth * (1 + (point.pressure || 0.5));
+        const lineWidth = baseLineWidth * (1 + (current.pressure || 0.5));
         ctx.lineWidth = lineWidth;
-        
-        if (isFirstPoint) {
-          ctx.moveTo(point.x, point.y);
-          isFirstPoint = false;
-        } else {
-          ctx.lineTo(point.x, point.y);
+
+        if (i === 0) {
+          // Move to the first point
+          ctx.moveTo(current.x, current.y);
         }
+        
+        // Draw quadratic curve to the midpoint
+        ctx.quadraticCurveTo(current.x, current.y, midX, midY);
       }
       
       ctx.stroke();
