@@ -21,39 +21,79 @@ const SignatureCapture = ({
     const signaturePadRef = useRef<SignaturePad | null>(null);
     const [signatureData, setSignatureData] = useState<Point[]>([]);
     const [isEmpty, setIsEmpty] = useState(true);
+    const containerRef = useRef<HTMLDivElement>(null);
   
+    // Handle canvas resizing
+    const resizeCanvas = () => {
+      const canvas = canvasRef.current;
+      const container = containerRef.current;
+      if (!canvas || !container) return;
+
+      // Get container width while respecting max-width
+      const containerWidth = container.clientWidth;
+      const containerHeight = (containerWidth * height) / width;
+
+      // Set canvas size with device pixel ratio for sharp rendering
+      const ratio = Math.max(window.devicePixelRatio || 1, 1);
+      canvas.width = containerWidth * ratio;
+      canvas.height = containerHeight * ratio;
+      canvas.style.width = `${containerWidth}px`;
+      canvas.style.height = `${containerHeight}px`;
+      canvas.getContext('2d')?.scale(ratio, ratio);
+
+      // Reinitialize SignaturePad if it exists
+      if (signaturePadRef.current) {
+        signaturePadRef.current.clear();
+        signaturePadRef.current.off();
+        signaturePadRef.current = new SignaturePad(canvas, {
+          backgroundColor: 'rgb(255, 255, 255)',
+          penColor,
+          minWidth: 0.5 * (containerWidth / width),
+          maxWidth: 2.5 * (containerWidth / width),
+          throttle: 16,
+          minDistance: 1 * (containerWidth / width),
+          velocityFilterWeight: 0.7,
+        });
+        signaturePadRef.current.addEventListener('beginStroke', () => {
+          setIsEmpty(false);
+        });
+      }
+    };
+
+    // Initialize canvas and handle resize
     useEffect(() => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       
-      // Set canvas size
-      const ratio = Math.max(window.devicePixelRatio || 1, 1);
-      canvas.width = width * ratio;
-      canvas.height = height * ratio;
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-      canvas.getContext('2d')?.scale(ratio, ratio);
-      
-      // Initialize SignaturePad with optimized parameters for smoothness
+      // Initialize SignaturePad
       signaturePadRef.current = new SignaturePad(canvas, {
         backgroundColor: 'rgb(255, 255, 255)',
         penColor,
-        minWidth: 0.5,  // Thinner minimum width for more detail
-        maxWidth: 2.5,  // Thicker maximum width for pressure sensitivity
-        throttle: 16,   // 60fps for smooth animation
-        minDistance: 1, // More points for smoother curves
-        velocityFilterWeight: 0.7, // Balance between speed and smoothness
+        minWidth: 0.5,
+        maxWidth: 2.5,
+        throttle: 16,
+        minDistance: 1,
+        velocityFilterWeight: 0.7,
       });
 
-      // Add event listeners for isEmpty state
+      // Add event listeners
       signaturePadRef.current.addEventListener('beginStroke', () => {
         setIsEmpty(false);
       });
-  
+
+      // Initial resize
+      resizeCanvas();
+
+      // Handle resize
+      window.addEventListener('resize', resizeCanvas);
+      window.addEventListener('orientationchange', resizeCanvas);
+
       return () => {
         if (signaturePadRef.current) {
           signaturePadRef.current.off();
         }
+        window.removeEventListener('resize', resizeCanvas);
+        window.removeEventListener('orientationchange', resizeCanvas);
       };
     }, [width, height, penColor]);
   
@@ -80,9 +120,16 @@ const SignatureCapture = ({
           stroke.points.forEach((point) => {
             if (typeof point.x !== 'number' || typeof point.y !== 'number' || typeof point.time !== 'number') return;
             
+            // Scale points back to original size
+            const container = containerRef.current;
+            if (!container) return;
+            
+            const scaleX = width / container.clientWidth;
+            const scaleY = height / container.clientHeight;
+            
             flatData.push({
-              x: point.x,
-              y: point.y,
+              x: point.x * scaleX,
+              y: point.y * scaleY,
               timestamp: point.time,
               pressure: point.pressure || 0.5
             });
@@ -106,24 +153,31 @@ const SignatureCapture = ({
     }, [isRecording]);
   
     return (
-      <div className="w-full">
+      <div className="w-full min-w-[300px] sm:min-w-[400px] md:min-w-[600px] lg:min-w-[800px] xl:min-w-[1000px] 2xl:min-w-[1200px]" ref={containerRef}>
         <h3 className="text-lg font-medium mb-2">Draw Signature</h3>
-        <canvas
-          ref={canvasRef}
-          className="w-full border-2 border-gray-300 rounded-lg cursor-crosshair bg-white"
-          style={{ touchAction: 'none' }}
-        />
+        <div className="relative w-full">
+          <canvas
+            ref={canvasRef}
+            className="w-full border-2 border-gray-300 rounded-lg cursor-crosshair bg-white touch-none"
+            style={{ 
+              touchAction: 'none',
+              WebkitTouchCallout: 'none',
+              WebkitUserSelect: 'none',
+              userSelect: 'none'
+            }}
+          />
+        </div>
         <div className="flex gap-2 mt-2">
           <button
             onClick={handleClear}
-            className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
+            className="flex-1 px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 active:bg-gray-700 touch-manipulation"
           >
             Clear
           </button>
           <button
             onClick={handleComplete}
             disabled={isEmpty}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            className="flex-1 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 active:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed touch-manipulation"
           >
             Process Signature
           </button>
