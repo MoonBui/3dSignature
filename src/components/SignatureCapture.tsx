@@ -3,7 +3,7 @@ import SignaturePad from 'signature_pad';
 import type { Point, SignaturePadStroke } from '../types/signature';
 
 interface SignatureCaptureProps {
-  onSignatureComplete: (data: Point[]) => void;
+  onSignatureComplete: (data: Point[], width: number, height: number) => void;
   isRecording: boolean;
   width?: number;
   height?: number;
@@ -137,12 +137,39 @@ const SignatureCapture = ({
         });
         
         if (flatData.length > 0) {
+          onSignatureComplete(flatData, width, height);
           setSignatureData(flatData);
-          onSignatureComplete(flatData);
         }
       } catch (error) {
         console.error('Error processing signature:', error);
       }
+    };
+  
+    const handleDownload = () => {
+      if (!signaturePadRef.current || isEmpty) return;
+
+      // Store the current signature data
+      const data = signaturePadRef.current.toData();
+      
+      // Create a temporary canvas
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = canvasRef.current?.width || width;
+      tempCanvas.height = canvasRef.current?.height || height;
+      
+      // Create a new SignaturePad instance with transparent background
+      const tempPad = new SignaturePad(tempCanvas, {
+        backgroundColor: 'rgba(255, 255, 255, 0)',
+        penColor: penColor
+      });
+      
+      // Restore the signature data to the temporary pad
+      tempPad.fromData(data);
+      
+      // Convert to PNG and trigger download
+      const link = document.createElement('a');
+      link.download = 'signature.png';
+      link.href = tempPad.toDataURL('image/png');
+      link.click();
     };
   
     // Auto-complete when recording stops
@@ -180,6 +207,13 @@ const SignatureCapture = ({
             className="flex-1 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 active:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed touch-manipulation"
           >
             Process Signature
+          </button>
+          <button
+            onClick={handleDownload}
+            disabled={isEmpty}
+            className="flex-1 px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 active:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed touch-manipulation"
+          >
+            Download PNG
           </button>
         </div>
         {signatureData.length > 0 && (

@@ -7,6 +7,8 @@ interface SignatureRecreateProps {
   height?: number;
   penColor?: string;
   baseLineWidth?: number;
+  originalWidth: number;
+  originalHeight: number;
 }
 
 const SignatureRecreate = ({ 
@@ -15,6 +17,8 @@ const SignatureRecreate = ({
   height = 200,
   penColor = 'rgb(37, 99, 235)',
   baseLineWidth = 2,
+  originalWidth,
+  originalHeight,
 }: SignatureRecreateProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -23,58 +27,42 @@ const SignatureRecreate = ({
   const animationRef = useRef<number | undefined>(undefined);
 
   // Draw signature using quadratic Bézier curves
-  const drawSignature = () => {
-    const canvas = canvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container || currentPoints.length === 0) return;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const containerWidth = container.clientWidth;
-    const containerHeight = (containerWidth * height) / width;
-
-    // Clear canvas
-    ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
-    // Draw signature
+  const drawSignature = (
+    ctx: CanvasRenderingContext2D,
+    points: Point[],
+    canvasWidth: number,
+    canvasHeight: number,
+    background: 'white' | 'transparent' = 'white'
+  ) => {
+    if (points.length === 0) return;
+    if (background === 'white') {
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+    } else {
+      ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+    }
     ctx.strokeStyle = penColor;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.beginPath();
-    
-    for (let i = 0; i < currentPoints.length - 1; i++) {
-      const current = currentPoints[i];
-      const next = currentPoints[i + 1];
-      
-      if (!current || !next || 
-          typeof current.x !== 'number' || typeof current.y !== 'number' ||
-          typeof next.x !== 'number' || typeof next.y !== 'number') continue;
-
-      // Scale points to container size
-      const currentX = (current.x / width) * containerWidth;
-      const currentY = (current.y / height) * containerHeight;
-      const nextX = (next.x / width) * containerWidth;
-      const nextY = (next.y / height) * containerHeight;
-
-      // Calculate control point for the quadratic curve
+    for (let i = 0; i < points.length - 1; i++) {
+      const current = points[i];
+      const next = points[i + 1];
+      if (!current || !next || typeof current.x !== 'number' || typeof current.y !== 'number' || typeof next.x !== 'number' || typeof next.y !== 'number') continue;
+      // Scale points to canvas size using originalWidth/originalHeight
+      const currentX = (current.x / originalWidth) * canvasWidth;
+      const currentY = (current.y / originalHeight) * canvasHeight;
+      const nextX = (next.x / originalWidth) * canvasWidth;
+      const nextY = (next.y / originalHeight) * canvasHeight;
       const midX = (currentX + nextX) / 2;
       const midY = (currentY + nextY) / 2;
-      
-      // Adjust line width based on pressure and container size
-      const lineWidth = baseLineWidth * (containerWidth / width) * (1 + (current.pressure || 0.5));
+      const lineWidth = baseLineWidth * (canvasWidth / originalWidth) * (1 + (current.pressure || 0.5));
       ctx.lineWidth = lineWidth;
-
       if (i === 0) {
-        // Move to the first point
         ctx.moveTo(currentX, currentY);
       }
-      
-      // Draw quadratic curve to the midpoint
       ctx.quadraticCurveTo(currentX, currentY, midX, midY);
     }
-    
     ctx.stroke();
   };
 
@@ -94,10 +82,34 @@ const SignatureRecreate = ({
     canvas.height = containerHeight * ratio;
     canvas.style.width = `${containerWidth}px`;
     canvas.style.height = `${containerHeight}px`;
-    canvas.getContext('2d')?.scale(ratio, ratio);
+    const ctx = canvas.getContext('2d');
+    if (ctx) ctx.scale(ratio, ratio);
 
-    // Redraw current points
-    drawSignature();
+    // Redraw current points using CSS pixel size
+    if (ctx) {
+      drawSignature(ctx, currentPoints, containerWidth, containerHeight);
+    }
+  };
+
+  const handleDownload = () => {
+    if (!canvasRef.current || currentPoints.length === 0) return;
+    const container = containerRef.current;
+    if (!container) return;
+    const containerWidth = container.clientWidth;
+    const containerHeight = (containerWidth * height) / width;
+    // Create a temporary canvas
+    const tempCanvas = document.createElement('canvas');
+    const tempCtx = tempCanvas.getContext('2d');
+    if (!tempCtx) return;
+    tempCanvas.width = containerWidth;
+    tempCanvas.height = containerHeight;
+    // Draw the signature on the temporary canvas with transparent background
+    drawSignature(tempCtx, currentPoints, tempCanvas.width, tempCanvas.height, 'transparent');
+    // Convert to PNG and trigger download
+    const link = document.createElement('a');
+    link.download = 'recreated-signature.png';
+    link.href = tempCanvas.toDataURL('image/png');
+    link.click();
   };
 
   // Initialize canvas and handle resize
@@ -117,7 +129,15 @@ const SignatureRecreate = ({
 
   // Draw when points change
   useEffect(() => {
-    drawSignature();
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      const containerWidth = container.clientWidth;
+      const containerHeight = (containerWidth * height) / width;
+      drawSignature(ctx, currentPoints, containerWidth, containerHeight);
+    }
   }, [currentPoints]);
 
   // Animate signature when new data arrives
@@ -183,6 +203,16 @@ const SignatureRecreate = ({
       {isAnimating && signatureData.length > 0 && (
         <div className="mt-2 text-sm text-gray-400">
           Drawing signature... {Math.round((currentPoints.length / signatureData.length) * 100)}%
+        </div>
+      )}
+      {!isAnimating && currentPoints.length > 0 && (
+        <div className="flex gap-2 mt-2">
+          <button
+            onClick={handleDownload}
+            className="flex-1 px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 active:bg-green-700 touch-manipulation"
+          >
+            Download PNG
+          </button>
         </div>
       )}
     </div>
