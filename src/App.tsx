@@ -26,8 +26,6 @@ function App() {
         <>
           <SignatureRecreate 
             signatureData={signatureData}
-            width={800}
-            height={400}
             originalWidth={originalSize.width}
             originalHeight={originalSize.height}
           />
