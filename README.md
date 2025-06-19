@@ -20,16 +20,6 @@ I was inspired by the Macbook's "Hello" screen saver, so I thought "Hmmmmm can t
 
 Clone the project
 
-```bash
-  git clone https://link-to-project
-```
-
-Go to the project directory
-
-```bash
-  cd my-project
-```
-
 Install dependencies
 
 ```bash
