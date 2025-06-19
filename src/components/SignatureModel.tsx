@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback, useLayoutEffect } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { Point } from '../types/signature';
+import { MeshLineGeometry, MeshLineMaterial } from 'meshline';
 
 interface SignatureModelProps {
   signatureData: Point[];
@@ -24,10 +25,68 @@ const SignatureModel = ({
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const meshRef = useRef<THREE.Mesh | null>(null);
+  const animationIdRef = useRef<number | null>(null);
+  const materialRef = useRef<MeshLineMaterial | null>(null);
+
+  console.log('SignatureModel render', { signatureDataLength: signatureData.length });
+
+  // Animation loop using useCallback to prevent recreation
+  const animate = useCallback(() => {
+    if (!controlsRef.current || !rendererRef.current || !sceneRef.current || !cameraRef.current) return;
+    
+    animationIdRef.current = requestAnimationFrame(animate);
+
+    // Update dash offset for drawing animation
+    if (materialRef.current) {
+      const currentOffset = materialRef.current.uniforms.dashOffset.value;
+      if (currentOffset > 0) {
+        materialRef.current.uniforms.dashOffset.value = Math.max(0, currentOffset - 0.003);
+      }
+    }
+
+    controlsRef.current.update();
+    rendererRef.current.render(sceneRef.current, cameraRef.current);
+  }, []);
+
+  // Store animate function in ref to avoid dependency issues
+  const animateRef = useRef(animate);
+  animateRef.current = animate;
 
   // Initialize Three.js scene
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!containerRef.current) return;
+
+    const cleanup = () => {
+      if (animationIdRef.current) {
+        cancelAnimationFrame(animationIdRef.current);
+      }
+      
+      if (controlsRef.current) {
+        controlsRef.current.dispose();
+      }
+      
+      if (rendererRef.current) {
+        if (containerRef.current?.contains(rendererRef.current.domElement)) {
+          containerRef.current.removeChild(rendererRef.current.domElement);
+        }
+        rendererRef.current.dispose();
+      }
+      
+      if (sceneRef.current) {
+        sceneRef.current.clear();
+      }
+      
+      // Clear refs
+      sceneRef.current = null;
+      cameraRef.current = null;
+      rendererRef.current = null;
+      controlsRef.current = null;
+      meshRef.current = null;
+      materialRef.current = null;
+    };
+
+    // Clean up before creating new scene
+    cleanup();
 
     // Create scene
     const scene = new THREE.Scene();
@@ -35,13 +94,8 @@ const SignatureModel = ({
     sceneRef.current = scene;
 
     // Create camera
-    const camera = new THREE.PerspectiveCamera(
-      75,
-      width / height,
-      0.1,
-      1000
-    );
-    camera.position.z = 200;
+    const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
+    camera.position.z = 120;
     cameraRef.current = camera;
 
     // Create renderer
@@ -50,95 +104,103 @@ const SignatureModel = ({
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
+    console.log('SignatureModel: Canvas added to DOM', containerRef.current.children.length);
+
     // Add orbit controls
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
+    controls.minDistance = 50;
+    controls.maxDistance = 200;
     controlsRef.current = controls;
 
-    // Add ambient light
+    // Add lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-    scene.add(ambientLight);
-
-    // Add directional light
     const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
     directionalLight.position.set(0, 1, 1);
-    scene.add(directionalLight);
+    scene.add(ambientLight, directionalLight);
 
-    // Animation loop
-    const animate = () => {
-      requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
-    };
-    animate();
+    // Start animation loop
+    animateRef.current();
 
-    // Cleanup
-    return () => {
-      if (containerRef.current && renderer.domElement) {
-        containerRef.current.removeChild(renderer.domElement);
-      }
-      renderer.dispose();
-    };
+    // Return cleanup function
+    return cleanup;
+  }, []); // Empty dependency array - only run once
+
+  // Update renderer size and camera when dimensions change
+  useLayoutEffect(() => {
+    if (!rendererRef.current || !cameraRef.current) return;
+
+    rendererRef.current.setSize(width, height);
+    cameraRef.current.aspect = width / height;
+    cameraRef.current.updateProjectionMatrix();
   }, [width, height]);
 
   // Update signature model when data changes
   useEffect(() => {
     if (!sceneRef.current || !signatureData.length) return;
 
-    // Remove existing mesh if any
+    // Clean up existing mesh
     if (meshRef.current) {
       sceneRef.current.remove(meshRef.current);
+      meshRef.current.geometry.dispose();
+      (meshRef.current.material as THREE.Material).dispose();
     }
 
-    // Create geometry from signature points
-    const geometry = new THREE.BufferGeometry();
-    const vertices: number[] = [];
-    const indices: number[] = [];
-    const uvs: number[] = [];
-
-    // Convert 2D points to 3D vertices
-    signatureData.forEach((point, i) => {
-      // Scale x and y to fit in the scene
-      const x = (point.x / width) * 100 - 50;
-      const y = -(point.y / height) * 100 + 50;
-      const z = (point.pressure || 0.5) * depth;
-
-      // Add vertex
-      vertices.push(x, y, z);
-      uvs.push(point.x / width, point.y / height);
-
-      // Create triangles for the stroke
-      if (i > 0) {
-        const prev = i - 1;
-        indices.push(prev, i, i + 1);
-      }
+    // Create new mesh from signature data
+    const rawPoints = signatureData.map(point => {
+      // Calculate the aspect ratio
+      const aspectRatio = width / height;
+      
+      // Scale points to maintain aspect ratio
+      // Increased scale for larger signature
+      const scale = 150;
+      const x = (point.x / width) * scale * aspectRatio - (scale * aspectRatio / 2);
+      const y = -(point.y / height) * scale + (scale / 2);
+      return new THREE.Vector3(x, y, 0);
     });
 
-    // Set geometry attributes
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-    geometry.setIndex(indices);
+    // Create a smooth curve from the points
+    const curve = new THREE.CatmullRomCurve3(rawPoints);
+    // Generate more points along the curve for smoothness
+    const points = curve.getPoints(rawPoints.length * 10);
 
-    // Create material
-    const material = new THREE.MeshPhongMaterial({
+    // Calculate total line length
+    let totalLength = 0;
+    for (let i = 1; i < points.length; i++) {
+      totalLength += points[i].distanceTo(points[i - 1]);
+    }
+
+    const lineGeometry = new MeshLineGeometry();
+    lineGeometry.setPoints(points);
+
+    const lineMaterial = new MeshLineMaterial({
       color: new THREE.Color(color),
-      side: THREE.DoubleSide,
-      flatShading: true,
+      lineWidth: 1.2,
+      resolution: new THREE.Vector2(window.innerWidth, window.innerHeight),
+      sizeAttenuation: 1,
+      alphaTest: 0.5,
+      dashArray: totalLength,
+      dashOffset: totalLength,
+      dashRatio: 0.5,
     });
+    lineMaterial.transparent = true;
+    lineMaterial.depthTest = false;
 
-    // Create mesh
-    const mesh = new THREE.Mesh(geometry, material);
-    sceneRef.current.add(mesh);
-    meshRef.current = mesh;
-
-    // Center the model
-    geometry.computeBoundingBox();
-    const center = new THREE.Vector3();
-    geometry.boundingBox?.getCenter(center);
-    mesh.position.sub(center);
-
+    materialRef.current = lineMaterial;
+    
+    const line = new THREE.Mesh(lineGeometry, lineMaterial);
+    sceneRef.current.add(line);
+    meshRef.current = line;
   }, [signatureData, width, height, depth, color]);
+
+  // const handleDownload = () => {
+  //   if (!containerRef.current) return;
+  //   const canvas = containerRef.current.querySelector('canvas');
+  //   if (!canvas) return;
+  //   const link = document.createElement('a');
+  //   link.download = 'signature.png';
+  // }
 
   return (
     <div className="w-full min-w-[300px] sm:min-w-[400px] md:min-w-[600px] lg:min-w-[800px] xl:min-w-[1000px] 2xl:min-w-[1200px]">
